@@ -1,0 +1,28 @@
+spring:
+  datasource:
+    url: ${NLOGIN_DB_CONNECTION}
+    driverClassName: "com.mysql.cj.jdbc.Driver"
+    username: ${NLOGIN_DB_USER}
+    password: ${NLOGIN_DB_PASSWORD}
+    hikari:
+      maximum-pool-size: ${NLOGIN_DB_POOL_SIZE:10}
+      connection-timeout: 5000
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+
+jwt:
+  signerKey: ${JWT_SIGNER_KEY}
+  valid-duration: ${JWT_VALID_DURATION:3600}
+  refreshable-duration: ${JWT_REFRESHABLE_DURATION:36000}
+
+app:
+  cors:
+    allowed-origins: ${APP_CORS_ORIGINS}
+
+logging:
+  level:
+    root: WARN
+    me.ihqqq.auth: INFO

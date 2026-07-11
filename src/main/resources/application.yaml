@@ -1,0 +1,24 @@
+server:
+  port: ${SERVER_PORT:8080}
+  servlet:
+    context-path: /api/v1
+
+spring:
+  application:
+    name: paramine-auth
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:test}
+
+  jpa:
+    properties:
+      hibernate:
+        format_sql: true
+
+nlogin:
+  algorithm: ${NLOGIN_ALGORITHM:BCRYPT2A}
+  bcrypt-rounds: ${NLOGIN_BCRYPT_ROUNDS:10}
+  pbkdf2-iterations: ${NLOGIN_PBKDF2_ITERATIONS:10000}
+  pbkdf2-hmac: ${NLOGIN_PBKDF2_HMAC:HmacSHA512}
+  argon2-iterations: ${NLOGIN_ARGON2_ITERATIONS:10}
+  argon2-memory-kb: ${NLOGIN_ARGON2_MEMORY_KB:65536}
+  argon2-parallelism: ${NLOGIN_ARGON2_PARALLELISM:1}

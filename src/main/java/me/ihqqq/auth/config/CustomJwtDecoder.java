@@ -1,0 +1,57 @@
+package me.ihqqq.auth.config;
+
+import com.nimbusds.jose.JOSEException;
+import me.ihqqq.auth.dto.request.IntrospectRequest;
+import me.ihqqq.auth.service.AuthenticationService;
+import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtException;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.stereotype.Component;
+
+import javax.crypto.spec.SecretKeySpec;
+import java.text.ParseException;
+
+@Component
+public class CustomJwtDecoder implements JwtDecoder {
+
+    private final String signerKey;
+
+    @Autowired
+    private AuthenticationService authenticationService;
+
+    private NimbusJwtDecoder nimbusJwtDecoder;
+
+    public CustomJwtDecoder(@Value("${jwt.signer-key}") String signerKey) {
+        this.signerKey = signerKey;
+    }
+
+    @PostConstruct
+    public void init() {
+        SecretKeySpec secretKeySpec = new SecretKeySpec(signerKey.getBytes(), "HS512");
+        this.nimbusJwtDecoder = NimbusJwtDecoder
+                .withSecretKey(secretKeySpec)
+                .macAlgorithm(MacAlgorithm.HS512)
+                .build();
+    }
+
+    @Override
+    public Jwt decode(String token) throws JwtException {
+        try {
+            var response = authenticationService.introspect(
+                    IntrospectRequest.builder().token(token).build());
+
+            if (!response.isValid()) {
+                throw new JwtException("Token invalid");
+            }
+        } catch (JOSEException | ParseException e) {
+            throw new JwtException(e.getMessage());
+        }
+
+        return nimbusJwtDecoder.decode(token);
+    }
+}
