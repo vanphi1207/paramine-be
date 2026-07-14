@@ -1,4 +1,4 @@
-package me.ihqqq.auth.dto.response;
+package me.ihqqq.auth.dto.request;
 
 import lombok.*;
 import lombok.experimental.FieldDefaults;
@@ -8,9 +8,6 @@ import lombok.experimental.FieldDefaults;
 @AllArgsConstructor
 @Builder
 @FieldDefaults(level = AccessLevel.PRIVATE)
-public class AccountResponse {
-    String username;
-    String uniqueId;
-    boolean premium;
-    String role;
+public class UpdateAccountStatusRequest {
+    boolean banned;
 }

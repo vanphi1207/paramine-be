@@ -8,9 +8,12 @@ import lombok.experimental.FieldDefaults;
 @AllArgsConstructor
 @Builder
 @FieldDefaults(level = AccessLevel.PRIVATE)
-public class AccountResponse {
+public class AdminAccountResponse {
+    String id;
     String username;
-    String uniqueId;
+    String email;
     boolean premium;
+    boolean banned;
     String role;
+    String createdAt;
 }

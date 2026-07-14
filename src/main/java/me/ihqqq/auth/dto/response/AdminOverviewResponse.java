@@ -8,9 +8,9 @@ import lombok.experimental.FieldDefaults;
 @AllArgsConstructor
 @Builder
 @FieldDefaults(level = AccessLevel.PRIVATE)
-public class AccountResponse {
-    String username;
-    String uniqueId;
-    boolean premium;
-    String role;
+public class AdminOverviewResponse {
+    long totalAccounts;
+    long premiumAccounts;
+    long onlineNow;
+    long newAccountsToday;
 }

@@ -17,6 +17,7 @@ public enum ErrorCode {
     ACCOUNT_ALREADY_EXISTS(1103, "Tên tài khoản đã tồn tại", HttpStatus.CONFLICT),
     INVALID_CREDENTIALS(1104, "Sai tên tài khoản hoặc mật khẩu", HttpStatus.UNAUTHORIZED),
     CURRENT_PASSWORD_INCORRECT(1105, "Mật khẩu hiện tại không đúng", HttpStatus.UNAUTHORIZED),
+    ACCOUNT_BANNED(1106, "Tài khoản đã bị khoá", HttpStatus.FORBIDDEN),
 
     USERNAME_INVALID(1110, "Tên tài khoản 3-16 ký tự, chỉ gồm chữ/số/gạch dưới", HttpStatus.BAD_REQUEST),
     USERNAME_REQUIRED(1111, "Tên tài khoản không được để trống", HttpStatus.BAD_REQUEST),
@@ -26,6 +27,7 @@ public enum ErrorCode {
     EMAIL_REQUIRED(1115, "Email không được để trống", HttpStatus.BAD_REQUEST),
 
     UNAUTHENTICATED(1120, "Phiên đăng nhập không hợp lệ hoặc đã hết hạn", HttpStatus.UNAUTHORIZED),
+    ACCESS_DENIED(1121, "Bạn không có quyền truy cập tài nguyên này", HttpStatus.FORBIDDEN),
     ;
 
     int code;

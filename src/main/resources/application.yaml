@@ -22,3 +22,6 @@ nlogin:
   argon2-iterations: ${NLOGIN_ARGON2_ITERATIONS:10}
   argon2-memory-kb: ${NLOGIN_ARGON2_MEMORY_KB:65536}
   argon2-parallelism: ${NLOGIN_ARGON2_PARALLELISM:1}
+
+auth:
+  token-validity-seconds: ${AUTH_TOKEN_VALIDITY_SECONDS:604800}

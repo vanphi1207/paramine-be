@@ -1,20 +1,18 @@
 package me.ihqqq.auth.service;
 
-import com.nimbusds.jose.*;
-import com.nimbusds.jose.crypto.MACSigner;
-import com.nimbusds.jose.crypto.MACVerifier;
-import com.nimbusds.jwt.JWTClaimsSet;
-import com.nimbusds.jwt.SignedJWT;
 import me.ihqqq.auth.dto.request.*;
 import me.ihqqq.auth.dto.response.AuthenticationResponse;
 import me.ihqqq.auth.dto.response.IntrospectResponse;
-import me.ihqqq.auth.entity.InvalidatedToken;
+import me.ihqqq.auth.entity.AccessToken;
+import me.ihqqq.auth.entity.AccountMeta;
 import me.ihqqq.auth.entity.NLoginAccount;
+import me.ihqqq.auth.entity.Role;
 import me.ihqqq.auth.exception.AppException;
 import me.ihqqq.auth.exception.ErrorCode;
 import me.ihqqq.auth.hash.PasswordHasher;
 import me.ihqqq.auth.mapper.AccountMapper;
-import me.ihqqq.auth.repository.InvalidatedTokenRepository;
+import me.ihqqq.auth.repository.AccessTokenRepository;
+import me.ihqqq.auth.repository.AccountMetaRepository;
 import me.ihqqq.auth.repository.NLoginAccountRepository;
 import me.ihqqq.auth.util.OfflineUuid;
 import lombok.AccessLevel;
@@ -26,10 +24,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.text.ParseException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.Date;
 import java.util.UUID;
 
 @Service
@@ -39,24 +35,17 @@ import java.util.UUID;
 public class AuthenticationService {
 
     NLoginAccountRepository accountRepository;
-    InvalidatedTokenRepository invalidatedTokenRepository;
+    AccountMetaRepository accountMetaRepository;
+    AccessTokenRepository accessTokenRepository;
     PasswordHasher passwordHasher;
     AccountMapper accountMapper;
 
     @NonFinal
-    @Value("${jwt.signer-key}")
-    protected String signerKey;
+    @Value("${auth.token-validity-seconds}")
+    protected long tokenValiditySeconds;
 
-    @NonFinal
-    @Value("${jwt.valid-duration}")
-    protected long validDuration;
-
-    @NonFinal
-    @Value("${jwt.refreshable-duration}")
-    protected long refreshableDuration;
-
-    @Transactional(readOnly = true)
-    public AuthenticationResponse login(LoginRequest request) throws JOSEException {
+    @Transactional
+    public AuthenticationResponse login(LoginRequest request) {
         NLoginAccount account = accountRepository.findByLastNameIgnoreCase(request.getUsername())
                 .orElseThrow(() -> new AppException(ErrorCode.ACCOUNT_NOT_FOUND));
 
@@ -69,16 +58,21 @@ public class AuthenticationService {
             throw new AppException(ErrorCode.INVALID_CREDENTIALS);
         }
 
-        var token = generateToken(account);
+        AccountMeta meta = ensureMeta(account);
+        if (meta.isBanned()) {
+            throw new AppException(ErrorCode.ACCOUNT_BANNED);
+        }
+
+        String token = issueToken(account.getLastName());
         return AuthenticationResponse.builder()
                 .token(token)
                 .authenticated(true)
-                .account(accountMapper.toAccountResponse(account))
+                .account(accountMapper.toAccountResponse(account, meta))
                 .build();
     }
 
     @Transactional
-    public AuthenticationResponse register(RegisterRequest request) throws JOSEException {
+    public AuthenticationResponse register(RegisterRequest request) {
         if (accountRepository.existsByLastNameIgnoreCase(request.getUsername())) {
             throw new AppException(ErrorCode.ACCOUNT_ALREADY_EXISTS);
         }
@@ -94,13 +88,21 @@ public class AuthenticationService {
                 .build();
 
         NLoginAccount saved = accountRepository.save(account);
+
+        AccountMeta meta = accountMetaRepository.save(AccountMeta.builder()
+                .uniqueId(saved.getUniqueId())
+                .role(Role.USER)
+                .banned(false)
+                .updatedAt(now)
+                .build());
+
         log.info("Account registered from web: {}", saved.getLastName());
 
-        var token = generateToken(saved);
+        String token = issueToken(saved.getLastName());
         return AuthenticationResponse.builder()
                 .token(token)
                 .authenticated(true)
-                .account(accountMapper.toAccountResponse(saved))
+                .account(accountMapper.toAccountResponse(saved, meta))
                 .build();
     }
 
@@ -118,87 +120,63 @@ public class AuthenticationService {
         log.info("Password changed from web for account: {}", account.getLastName());
     }
 
-    public IntrospectResponse introspect(IntrospectRequest request) throws JOSEException, ParseException {
-        boolean isValid = true;
-        try {
-            verifyToken(request.getToken(), false);
-        } catch (AppException e) {
-            isValid = false;
+    @Transactional(readOnly = true)
+    public IntrospectResponse introspect(IntrospectRequest request) {
+        boolean valid = request.getToken() != null && accessTokenRepository.findById(request.getToken())
+                .filter(t -> t.getExpiryTime().isAfter(Instant.now()))
+                .isPresent();
+        return IntrospectResponse.builder().valid(valid).build();
+    }
+
+    @Transactional
+    public void logout(LogoutRequest request) {
+        if (request.getToken() != null) {
+            accessTokenRepository.deleteById(request.getToken());
         }
-        return IntrospectResponse.builder().valid(isValid).build();
     }
 
     @Transactional
-    public void logout(LogoutRequest request) throws ParseException, JOSEException {
-        var signedJWT = verifyToken(request.getToken(), true);
-        invalidateToken(signedJWT);
-    }
-
-    @Transactional
-    public AuthenticationResponse refreshToken(RefreshRequest request) throws ParseException, JOSEException {
-        var signedJWT = verifyToken(request.getToken(), true);
-        invalidateToken(signedJWT);
-
-        String username = signedJWT.getJWTClaimsSet().getSubject();
-        NLoginAccount account = accountRepository.findByLastNameIgnoreCase(username)
+    public AuthenticationResponse refreshToken(RefreshRequest request) {
+        AccessToken oldToken = accessTokenRepository.findById(request.getToken())
+                .filter(t -> t.getExpiryTime().isAfter(Instant.now()))
                 .orElseThrow(() -> new AppException(ErrorCode.UNAUTHENTICATED));
 
-        var token = generateToken(account);
+        accessTokenRepository.deleteById(oldToken.getToken());
+
+        NLoginAccount account = accountRepository.findByLastNameIgnoreCase(oldToken.getUsername())
+                .orElseThrow(() -> new AppException(ErrorCode.UNAUTHENTICATED));
+
+        AccountMeta meta = ensureMeta(account);
+        if (meta.isBanned()) {
+            throw new AppException(ErrorCode.ACCOUNT_BANNED);
+        }
+
+        String token = issueToken(account.getLastName());
         return AuthenticationResponse.builder()
                 .token(token)
                 .authenticated(true)
-                .account(accountMapper.toAccountResponse(account))
+                .account(accountMapper.toAccountResponse(account, meta))
                 .build();
     }
 
-    private void invalidateToken(SignedJWT signedJWT) throws ParseException {
-        String jit = signedJWT.getJWTClaimsSet().getJWTID();
-        Date expiryTime = signedJWT.getJWTClaimsSet().getExpirationTime();
+    private AccountMeta ensureMeta(NLoginAccount account) {
+        return accountMetaRepository.findById(account.getUniqueId())
+                .orElseGet(() -> accountMetaRepository.save(AccountMeta.builder()
+                        .uniqueId(account.getUniqueId())
+                        .role(Role.USER)
+                        .banned(false)
+                        .updatedAt(Instant.now())
+                        .build()));
+    }
 
-        invalidatedTokenRepository.save(InvalidatedToken.builder()
-                .id(jit)
-                .expiryTime(expiryTime)
+    private String issueToken(String username) {
+        String token = UUID.randomUUID().toString();
+        accessTokenRepository.save(AccessToken.builder()
+                .token(token)
+                .username(username)
+                .expiryTime(Instant.now().plus(tokenValiditySeconds, ChronoUnit.SECONDS))
+                .createdAt(Instant.now())
                 .build());
-    }
-
-    private String generateToken(NLoginAccount account) throws JOSEException {
-        JWSHeader jwsHeader = new JWSHeader(JWSAlgorithm.HS512);
-
-        JWTClaimsSet jwtClaimsSet = new JWTClaimsSet.Builder()
-                .subject(account.getLastName())
-                .issuer("paramine.fun")
-                .issueTime(new Date())
-                .expirationTime(new Date(Instant.now().plus(validDuration, ChronoUnit.SECONDS).toEpochMilli()))
-                .jwtID(UUID.randomUUID().toString())
-                .claim("uniqueId", account.getUniqueId())
-                .claim("premium", account.isPremium())
-                .build();
-
-        Payload payload = new Payload(jwtClaimsSet.toJSONObject());
-        JWSObject jwsObject = new JWSObject(jwsHeader, payload);
-        jwsObject.sign(new MACSigner(signerKey.getBytes()));
-
-        return jwsObject.serialize();
-    }
-
-    private SignedJWT verifyToken(String token, boolean isRefresh) throws JOSEException, ParseException {
-        JWSVerifier verifier = new MACVerifier(signerKey.getBytes());
-        SignedJWT signedJWT = SignedJWT.parse(token);
-
-        Date expiryTime = isRefresh
-                ? new Date(signedJWT.getJWTClaimsSet().getIssueTime().toInstant()
-                .plus(refreshableDuration, ChronoUnit.SECONDS).toEpochMilli())
-                : signedJWT.getJWTClaimsSet().getExpirationTime();
-
-        boolean verified = signedJWT.verify(verifier);
-        if (!(verified && expiryTime.after(new Date()))) {
-            throw new AppException(ErrorCode.UNAUTHENTICATED);
-        }
-
-        if (invalidatedTokenRepository.existsById(signedJWT.getJWTClaimsSet().getJWTID())) {
-            throw new AppException(ErrorCode.UNAUTHENTICATED);
-        }
-
-        return signedJWT;
+        return token;
     }
 }

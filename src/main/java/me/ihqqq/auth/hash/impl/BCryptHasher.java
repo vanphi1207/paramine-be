@@ -15,8 +15,8 @@ public final class BCryptHasher implements PasswordHasher {
 
     @Override
     public String hash(String plainPassword) {
-        String salt = BCrypt.gensalt(rounds, new java.security.SecureRandom())
-                .replaceFirst("^\\$2[a-z]\\$", "$2" + version + "$");
+        String rawSalt = BCrypt.gensalt(rounds, new java.security.SecureRandom());
+        String salt = "$2" + version + rawSalt.substring(3);
         return BCrypt.hashpw(plainPassword, salt);
     }
 
